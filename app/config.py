@@ -27,6 +27,8 @@ logger = structlog.get_logger(__name__)
 class Settings(BaseSettings):
     BOT_TOKEN: str
     BOT_USERNAME: str | None = None
+    FREE_MODE: bool = False
+    BOT_ACCESS_PASSWORDS: str = ''
     ADMIN_IDS: str = ''
     ADMIN_EMAILS: str = ''  # Comma-separated admin emails for email-only users
 

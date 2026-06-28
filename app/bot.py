@@ -297,6 +297,11 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     except Exception as e:
         logger.error('Ошибка запуска RemnaWave retry queue', error=e)
 
+    if settings.FREE_MODE:
+        logger.info('🎁 FREE_MODE активирован (коммерческие функции отключены)')
+    else:
+        logger.info('💰 FREE_MODE отключен (коммерческие функции включены)')
+
     logger.info('Бот успешно настроен')
 
     return bot, dp

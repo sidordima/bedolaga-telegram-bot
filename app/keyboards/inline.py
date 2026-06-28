@@ -495,6 +495,8 @@ def _build_cabinet_main_menu_keyboard(
                 case 'balance':
                     if not section_cfg.get('enabled', True):
                         continue
+                    if settings.FREE_MODE:
+                        continue
                     balance_text = _get_balance_text(cached_styles, language, texts, balance_kopeks)
                     row_buttons.append(_cabinet_button(balance_text, '/balance', 'menu_balance'))
 
@@ -584,7 +586,7 @@ def get_main_menu_keyboard(
 ) -> InlineKeyboardMarkup:
     texts = get_texts(language)
 
-    if settings.is_cabinet_mode():
+    if settings.is_cabinet_mode() and not settings.FREE_MODE:
         return _build_cabinet_main_menu_keyboard(
             language,
             texts,
@@ -702,7 +704,8 @@ def get_main_menu_keyboard(
                 )
             )
 
-    keyboard.append([InlineKeyboardButton(text=balance_button_text, callback_data='menu_balance')])
+    if not settings.FREE_MODE:
+        keyboard.append([InlineKeyboardButton(text=balance_button_text, callback_data='menu_balance')])
 
     show_trial = (
         not has_had_paid_subscription
@@ -710,8 +713,10 @@ def get_main_menu_keyboard(
         and settings.TRIAL_DURATION_DAYS > 0
         and settings.TRIAL_DISABLED_FOR != 'all'
     )
+    if settings.FREE_MODE:
+        show_trial = False
 
-    show_buy = not has_active_subscription or not subscription_is_active
+    show_buy = not settings.FREE_MODE and (not has_active_subscription or not subscription_is_active)
     current_subscription = subscription
     bool(
         current_subscription

@@ -1,3 +1,7 @@
+
+from app.database.crud.subscription import create_paid_subscription, get_subscription_by_user_id
+from app.services.subscription_service import SubscriptionService
+
 import html
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -55,7 +59,6 @@ from app.services.referral_service import (
     save_pending_campaign,
     save_pending_referral,
 )
-from app.services.subscription_service import SubscriptionService
 from app.services.support_settings_service import SupportSettingsService
 from app.services.web_auth_service import WEB_AUTH_TOKEN_MIN_LENGTH, link_web_auth_token
 from app.states import RegistrationStates
@@ -731,6 +734,14 @@ async def _continue_registration_after_language(
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
     logger.info('🚀 START: Обработка /start от', from_user_id=message.from_user.id)
 
+    if settings.FREE_MODE:
+        data = await state.get_data() or {}
+        if not data.get('password_accepted'):
+            if not db_user or db_user.status != UserStatus.ACTIVE.value:
+                await message.answer("🔒 Введите пароль для доступа к боту:")
+                await state.set_state(RegistrationStates.waiting_for_password)
+                return
+
     data = await state.get_data() or {}
 
     # ИСПРАВЛЕНИЕ БАГА: используем .get() вместо .pop() для campaign_notification_sent
@@ -1074,9 +1085,126 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             # Refresh user to pick up newly created subscriptions
             await db.refresh(user, attribute_names=['subscriptions'])
 
+        if settings.FREE_MODE:
+
+
+            try:
+
+
+                
+
+        
+
+                
+
+                
+
+                sub = await get_subscription_by_user_id(db, user.id)
+
+
+                if sub and (sub.status != SubscriptionStatus.ACTIVE.value or sub.is_trial):
+
+
+                    sub.status = SubscriptionStatus.ACTIVE.value
+
+
+                    sub.is_trial = False
+
+
+                    sub.end_date = datetime.now(UTC) + timedelta(days=36500)
+
+
+                    await db.commit()
+
+
+                    logger.info('🎁 Обновлена бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                    await db.refresh(sub)
+
+
+                    await SubscriptionService().update_remnawave_user(db, sub, reset_traffic=True, reset_reason='free_mode_update', sync_squads=True)
+
+
+                    await db.refresh(user, ['subscriptions'])
+
+
+                elif not sub:
+
+
+                    new_sub = await create_paid_subscription(
+
+
+                        db=db,
+
+
+                        user_id=user.id,
+
+
+                        duration_days=36500,
+
+
+                        traffic_limit_gb=0,
+
+
+                        is_trial=False,
+
+
+                        commit=True,
+
+
+                    )
+
+
+                    logger.info('🎁 Выдана бесконечная бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                    await SubscriptionService().create_remnawave_user(db, new_sub, reset_traffic=True, reset_reason='free_mode_create')
+
+
+                    await db.refresh(user, ['subscriptions'])
+
+
+            except Exception as e:
+
+
+                import traceback
+
+
+                logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
+
+
+                try:
+
+
+                    # Try to report error to user if possible, ignore if callback/message object doesn't have answer
+
+
+                    await locals().get('message', locals().get('callback', locals().get('callback_query'))).answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
+
+                except Exception:
+
+
+                    pass
+                import traceback
+                logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
+                await message.answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
+            await db.refresh(user, attribute_names=['subscriptions'])
+
+            debug_info = f"DEBUG: subs_count={len(getattr(user, 'subscriptions', None) or [])}, "
+            first_sub_debug = next((s for s in getattr(user, 'subscriptions', None) or [] if getattr(s, 'is_active', False)), (getattr(user, 'subscriptions', None) or [])[0] if getattr(user, 'subscriptions', None) else None)
+            if first_sub_debug:
+                has_act_db, sub_is_act_db = _calculate_subscription_flags(first_sub_debug)
+                debug_info += f"sub_status={first_sub_debug.status}, sub_trial={first_sub_debug.is_trial}, is_active_prop={getattr(first_sub_debug, 'is_active', False)}, has_active={has_act_db}, sub_is_active={sub_is_act_db}"
+            else:
+                debug_info += "No first_sub_debug"
+            await message.answer(debug_info)
+
         user_subs_for_flags = getattr(user, 'subscriptions', None) or []
         first_sub_for_flags = next(
-            (s for s in user_subs_for_flags if s.is_active), user_subs_for_flags[0] if user_subs_for_flags else None
+            (s for s in user_subs_for_flags if getattr(s, 'is_active', False)), user_subs_for_flags[0] if user_subs_for_flags else None
         )
         has_active_subscription, subscription_is_active = _calculate_subscription_flags(first_sub_for_flags)
 
@@ -1930,9 +2058,114 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
         telegram_id=user.telegram_id,
     )
 
-    # Auto-activate pending gift for newly registered user (before state.clear() wipes the token)
     await _activate_pending_gift_after_registration(db, state, user, callback.message.answer)
     await _persist_pending_subid_after_registration(db, state, user)
+
+    if settings.FREE_MODE:
+
+
+        try:
+
+
+            
+
+    
+
+            
+
+            
+
+            sub = await get_subscription_by_user_id(db, user.id)
+
+
+            if sub and (sub.status != SubscriptionStatus.ACTIVE.value or sub.is_trial):
+
+
+                sub.status = SubscriptionStatus.ACTIVE.value
+
+
+                sub.is_trial = False
+
+
+                sub.end_date = datetime.now(UTC) + timedelta(days=36500)
+
+
+                await db.commit()
+
+
+                logger.info('🎁 Обновлена бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                await db.refresh(sub)
+
+
+                await SubscriptionService().update_remnawave_user(db, sub, reset_traffic=True, reset_reason='free_mode_update', sync_squads=True)
+
+
+                await db.refresh(user, ['subscriptions'])
+
+
+            elif not sub:
+
+
+                new_sub = await create_paid_subscription(
+
+
+                    db=db,
+
+
+                    user_id=user.id,
+
+
+                    duration_days=36500,
+
+
+                    traffic_limit_gb=0,
+
+
+                    is_trial=False,
+
+
+                    commit=True,
+
+
+                )
+
+
+                logger.info('🎁 Выдана бесконечная бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                await SubscriptionService().create_remnawave_user(db, new_sub, reset_traffic=True, reset_reason='free_mode_create')
+
+
+                await db.refresh(user, ['subscriptions'])
+
+
+        except Exception as e:
+
+
+            import traceback
+
+
+            logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
+
+
+            try:
+
+
+                # Try to report error to user if possible, ignore if callback/message object doesn't have answer
+
+
+                await locals().get('message', locals().get('callback', locals().get('callback_query'))).answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
+
+            except Exception:
+
+
+                pass
+            import traceback
+            logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
+            await callback.message.answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
 
     await state.clear()
 
@@ -2050,6 +2283,112 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
                 )
             )
 
+        if settings.FREE_MODE:
+
+
+            try:
+
+
+                
+
+        
+
+                
+
+                
+
+                sub = await get_subscription_by_user_id(db, existing_user.id)
+
+
+                if sub and (sub.status != SubscriptionStatus.ACTIVE.value or sub.is_trial):
+
+
+                    sub.status = SubscriptionStatus.ACTIVE.value
+
+
+                    sub.is_trial = False
+
+
+                    sub.end_date = datetime.now(UTC) + timedelta(days=36500)
+
+
+                    await db.commit()
+
+
+                    logger.info('🎁 Обновлена бесплатная подписка (FREE_MODE)', user_id=existing_user.id)
+
+
+                    await db.refresh(sub)
+
+
+                    await SubscriptionService().update_remnawave_user(db, sub, reset_traffic=True, reset_reason='free_mode_update', sync_squads=True)
+
+
+                    await db.refresh(existing_user, ['subscriptions'])
+
+
+                elif not sub:
+
+
+                    new_sub = await create_paid_subscription(
+
+
+                        db=db,
+
+
+                        user_id=existing_user.id,
+
+
+                        duration_days=36500,
+
+
+                        traffic_limit_gb=0,
+
+
+                        is_trial=False,
+
+
+                        commit=True,
+
+
+                    )
+
+
+                    logger.info('🎁 Выдана бесконечная бесплатная подписка (FREE_MODE)', user_id=existing_user.id)
+
+
+                    await SubscriptionService().create_remnawave_user(db, new_sub, reset_traffic=True, reset_reason='free_mode_create')
+
+
+                    await db.refresh(existing_user, ['subscriptions'])
+
+
+            except Exception as e:
+
+
+                import traceback
+
+
+                logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=existing_user.id, error=e)
+
+
+                try:
+
+
+                    # Try to report error to user if possible, ignore if callback/message object doesn't have answer
+
+
+                    await locals().get('message', locals().get('callback', locals().get('callback_query'))).answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
+
+                except Exception:
+
+
+                    pass
+                import traceback
+                logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=existing_user.id, error=e)
+                await message.answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
         await db.refresh(existing_user, ['subscriptions'])
 
         existing_user_subs = getattr(existing_user, 'subscriptions', None) or []
@@ -2057,6 +2396,14 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             (s for s in existing_user_subs if s.is_active), existing_user_subs[0] if existing_user_subs else None
         )
         has_active_subscription, subscription_is_active = _calculate_subscription_flags(first_existing_sub)
+
+        if settings.FREE_MODE:
+            debug_info = f"DEBUG: subs_count={len(existing_user_subs)}, "
+            if first_existing_sub:
+                debug_info += f"sub_status={first_existing_sub.status}, sub_trial={first_existing_sub.is_trial}, is_active_prop={first_existing_sub.is_active}, has_active={has_active_subscription}, sub_is_active={subscription_is_active}"
+            else:
+                debug_info += "No first_existing_sub"
+            await message.answer(debug_info)
 
         menu_text = await get_main_menu_text(existing_user, texts, db)
 
@@ -2281,6 +2628,110 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
     # Auto-activate pending gift for newly registered user (before state.clear() wipes the token)
     await _activate_pending_gift_after_registration(db, state, user, message.answer)
     await _persist_pending_subid_after_registration(db, state, user)
+
+    if settings.FREE_MODE:
+
+
+        try:
+
+
+            
+
+    
+
+            
+
+            
+
+            sub = await get_subscription_by_user_id(db, user.id)
+
+
+            if sub and (sub.status != SubscriptionStatus.ACTIVE.value or sub.is_trial):
+
+
+                sub.status = SubscriptionStatus.ACTIVE.value
+
+
+                sub.is_trial = False
+
+
+                sub.end_date = datetime.now(UTC) + timedelta(days=36500)
+
+
+                await db.commit()
+
+
+                logger.info('🎁 Обновлена бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                await db.refresh(sub)
+
+
+                await SubscriptionService().update_remnawave_user(db, sub, reset_traffic=True, reset_reason='free_mode_update', sync_squads=True)
+
+
+                await db.refresh(user, ['subscriptions'])
+
+
+            elif not sub:
+
+
+                new_sub = await create_paid_subscription(
+
+
+                    db=db,
+
+
+                    user_id=user.id,
+
+
+                    duration_days=36500,
+
+
+                    traffic_limit_gb=0,
+
+
+                    is_trial=False,
+
+
+                    commit=True,
+
+
+                )
+
+
+                logger.info('🎁 Выдана бесконечная бесплатная подписка (FREE_MODE)', user_id=user.id)
+
+
+                await SubscriptionService().create_remnawave_user(db, new_sub, reset_traffic=True, reset_reason='free_mode_create')
+
+
+                await db.refresh(user, ['subscriptions'])
+
+
+        except Exception as e:
+
+
+            import traceback
+
+
+            logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
+
+
+            try:
+
+
+                # Try to report error to user if possible, ignore if callback/message object doesn't have answer
+
+
+                await locals().get('message', locals().get('callback', locals().get('callback_query'))).answer(f"DEBUG ERROR in FREE_MODE: {e}\n<pre>{traceback.format_exc()}</pre>", parse_mode="HTML")
+
+
+            except Exception:
+
+
+                pass
+            logger.error('❌ Ошибка FREE_MODE при выдаче/обновлении подписки', user_id=user.id, error=e)
 
     await state.clear()
 
@@ -2919,11 +3370,25 @@ async def process_webauth_confirm(
         )
 
 
+async def process_password_input(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
+    password = message.text.strip()
+    valid_passwords = [p.strip() for p in settings.BOT_ACCESS_PASSWORDS.split(',')] if settings.BOT_ACCESS_PASSWORDS else []
+    if password in valid_passwords:
+        await message.answer("✅ Пароль принят! Добро пожаловать.")
+        await state.update_data(password_accepted=True)
+        await state.set_state(None)
+        await cmd_start(message, state, db, db_user)
+    else:
+        await message.answer("❌ Неверный пароль. Попробуйте еще раз:")
+
 def register_handlers(dp: Dispatcher):
     logger.debug('=== НАЧАЛО регистрации обработчиков start.py ===')
 
     dp.message.register(cmd_start, Command('start'))
     logger.debug('Зарегистрирован cmd_start')
+
+    dp.message.register(process_password_input, StateFilter(RegistrationStates.waiting_for_password))
+    logger.debug('Зарегистрирован process_password_input')
 
     dp.callback_query.register(
         process_rules_accept,

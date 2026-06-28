@@ -114,6 +114,7 @@ class AuthMiddleware(BaseMiddleware):
                         current_state = await state.get_state()
 
                     registration_states = [
+                        RegistrationStates.waiting_for_password.state,
                         RegistrationStates.waiting_for_language.state,
                         RegistrationStates.waiting_for_rules_accept.state,
                         RegistrationStates.waiting_for_privacy_policy_accept.state,
